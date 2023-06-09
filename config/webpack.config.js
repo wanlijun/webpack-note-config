@@ -30,6 +30,7 @@ const ModuleScopePlugin = require('react-dev-utils/ModuleScopePlugin');
 const getCSSModuleLocalIdent = require('react-dev-utils/getCSSModuleLocalIdent');
 // eslint插件
 const ESLintPlugin = require('eslint-webpack-plugin');
+const DuplicateHtmlWebpackPlugin = require('./DuplicateHtmlWebpackPlugin');
 // 定义了很多文件的路径，例如src、html、jsconfig.json
 const paths = require('./paths');
 // getAdditionalModulePaths
@@ -50,51 +51,57 @@ const ForkTsCheckerWebpackPlugin =
 const ReactRefreshWebpackPlugin = require('@pmmmwh/react-refresh-webpack-plugin');
 // 创建了一个hash值
 const createEnvironmentHash = require('./webpack/persistentCache/createEnvironmentHash');
-
+// 大的Source maps将会造成内存问题
 // Source maps are resource heavy and can cause out of memory issue for large source files.
 const shouldUseSourceMap = process.env.GENERATE_SOURCEMAP !== 'false';
-
+// react-refresh是官方提供的热更新组件的工具
 const reactRefreshRuntimeEntry = require.resolve('react-refresh/runtime');
+// 这个插件实现了react组件的Fast Refresh
 const reactRefreshWebpackPluginRuntimeEntry = require.resolve(
   '@pmmmwh/react-refresh-webpack-plugin'
 );
+// 这是Create React App创建的一组babel预设
 const babelRuntimeEntry = require.resolve('babel-preset-react-app');
 const babelRuntimeEntryHelpers = require.resolve(
   '@babel/runtime/helpers/esm/assertThisInitialized',
   { paths: [babelRuntimeEntry] }
 );
+// babel的模块运行帮助函数
 const babelRuntimeRegenerator = require.resolve('@babel/runtime/regenerator', {
   paths: [babelRuntimeEntry],
 });
 
 // Some apps do not need the benefits of saving a web request, so not inlining the chunk
 // makes for a smoother build process.
+// 有一些app不需要减少web 请求，所以不必内联chunk以获得更丝滑的构建体验
 const shouldInlineRuntimeChunk = process.env.INLINE_RUNTIME_CHUNK !== 'false';
 
 const emitErrorsAsWarnings = process.env.ESLINT_NO_DEV_ERRORS === 'true';
+// 是否禁用eslint插件
 const disableESLintPlugin = process.env.DISABLE_ESLINT_PLUGIN === 'true';
 
+// 设置内联图片的尺寸大小
 const imageInlineSizeLimit = parseInt(
   process.env.IMAGE_INLINE_SIZE_LIMIT || '10000'
 );
 
-// Check if TypeScript is setup
+//检查TypeScript配置文件是否存在
 const useTypeScript = fs.existsSync(paths.appTsConfig);
 
-// Check if Tailwind config exists
+//检查Tailwind是否存在
 const useTailwind = fs.existsSync(
   path.join(paths.appPath, 'tailwind.config.js')
 );
 
-// Get the path to the uncompiled service worker (if it exists).
+//如果service worker存在，那么获取他的路径
 const swSrc = paths.swSrc;
 
-// style files regexes
+// 样式文件的正则
 const cssRegex = /\.css$/;
 const cssModuleRegex = /\.module\.css$/;
 const sassRegex = /\.(scss|sass)$/;
 const sassModuleRegex = /\.module\.(scss|sass)$/;
-
+// react/jsx-runtime替代React.createElement方法
 const hasJsxRuntime = (() => {
   if (process.env.DISABLE_NEW_JSX_TRANSFORM === 'true') {
     return false;
@@ -107,15 +114,14 @@ const hasJsxRuntime = (() => {
     return false;
   }
 })();
-
-// This is the production and development configuration.
-// It is focused on developer experience, fast rebuilds, and a minimal bundle.
+ // 这是生成环境和开发环境的配置，它专注开发体验，快速的构建以及打包之后的文件尺寸更小
 module.exports = function (webpackEnv) {
   const isEnvDevelopment = webpackEnv === 'development';
   const isEnvProduction = webpackEnv === 'production';
 
   // Variable used for enabling profiling in Production
   // passed into alias object. Uses a flag if passed into the build command
+  // 是否在生成环境开启了性能分析的功能
   const isEnvProductionProfile =
     isEnvProduction && process.argv.includes('--profile');
 
@@ -123,13 +129,17 @@ module.exports = function (webpackEnv) {
   // as %PUBLIC_URL% in `index.html` and `process.env.PUBLIC_URL` in JavaScript.
   // Omit trailing slash as %PUBLIC_URL%/xyz looks better than %PUBLIC_URL%xyz.
   // Get environment variables to inject into our app.
+  // 我们提供了paths.publicUrlOrPath配置，这个变量会影响到html里面%PUBLIC_URL%以及js中process.env.PUBLIC_URL的值
   const env = getClientEnvironment(paths.publicUrlOrPath.slice(0, -1));
-
+  // 是否使用fast refresh
   const shouldUseReactRefresh = env.raw.FAST_REFRESH;
 
   // common function to get style loaders
+  // 获取style loaders
   const getStyleLoaders = (cssOptions, preProcessor) => {
     const loaders = [
+      // 开发模式下加载style-loader，为css创建一个style标签注入到html中
+      // 样式可以立即应用于页面，并且可以动态更新
       isEnvDevelopment && require.resolve('style-loader'),
       isEnvProduction && {
         loader: MiniCssExtractPlugin.loader,
@@ -139,7 +149,7 @@ module.exports = function (webpackEnv) {
           ? { publicPath: '../../' }
           : {},
       },
-      {
+      {// 解析@import 和 url()
         loader: require.resolve('css-loader'),
         options: cssOptions,
       },
@@ -147,6 +157,7 @@ module.exports = function (webpackEnv) {
         // Options for PostCSS as we reference these options twice
         // Adds vendor prefixing based on your specified browser support in
         // package.json
+        // 利用从 Can I Use 网站获取的数据为 CSS 规则添加特定厂商的前缀
         loader: require.resolve('postcss-loader'),
         options: {
           postcssOptions: {
@@ -192,6 +203,7 @@ module.exports = function (webpackEnv) {
     if (preProcessor) {
       loaders.push(
         {
+          // 这个loader允许你分布式的scss文件
           loader: require.resolve('resolve-url-loader'),
           options: {
             sourceMap: isEnvProduction ? shouldUseSourceMap : isEnvDevelopment,
@@ -210,12 +222,16 @@ module.exports = function (webpackEnv) {
   };
 
   return {
+    //webpack会根据target属性构建特定环境下的运行时代码
+    // 如果browserslist config存在则从中推断代码将要运行的平台以及浏览器将会满足的特性
     target: ['browserslist'],
-    // Webpack noise constrained to errors and warnings
+    // 仅仅在有错误信息或者警告信息输出统计数据
     stats: 'errors-warnings',
     mode: isEnvProduction ? 'production' : isEnvDevelopment && 'development',
     // Stop compilation early in production
+    // 生成环境下，遇到错误就停止编译
     bail: isEnvProduction,
+    // 选择合适的source-map， production 使用source-map，开发环境使用cheap-module-source-map
     devtool: isEnvProduction
       ? shouldUseSourceMap
         ? 'source-map'
@@ -223,27 +239,35 @@ module.exports = function (webpackEnv) {
       : isEnvDevelopment && 'cheap-module-source-map',
     // These are the "entry points" to our application.
     // This means they will be the "root" imports that are included in JS bundle.
+    // 设置entry points
     entry: paths.appIndexJs,
+    // 输出
     output: {
-      // The build folder.
+      // 输出的文件夹，默认是build
       path: paths.appBuild,
       // Add /* filename */ comments to generated require()s in the output.
+      // 开发环境下会给每个模块以注释的方式添加一些模块信息
       pathinfo: isEnvDevelopment,
       // There will be one main bundle, and one file per asynchronous chunk.
       // In development, it does not produce real files.
+      // 设置主bundle的名字
       filename: isEnvProduction
         ? 'static/js/[name].[contenthash:8].js'
         : isEnvDevelopment && 'static/js/bundle.js',
       // There are also additional JS chunk files if you use code splitting.
+      // 设置其他chunk的名字
       chunkFilename: isEnvProduction
         ? 'static/js/[name].[contenthash:8].chunk.js'
         : isEnvDevelopment && 'static/js/[name].chunk.js',
+      // 设置文件的名字
       assetModuleFilename: 'static/media/[name].[hash][ext]',
       // webpack uses `publicPath` to determine where the app is being served from.
       // It requires a trailing slash, or the file assets will get an incorrect path.
       // We inferred the "public path" (such as / or /my-project) from homepage.
+      // 文件资源的前缀
       publicPath: paths.publicUrlOrPath,
       // Point sourcemap entries to original disk location (format as URL on Windows)
+      //将sourcemap指向硬盘的文件地址，并且格式化Windows中的url
       devtoolModuleFilenameTemplate: isEnvProduction
         ? info =>
             path
@@ -253,10 +277,20 @@ module.exports = function (webpackEnv) {
           (info => path.resolve(info.absoluteResourcePath).replace(/\\/g, '/')),
     },
     cache: {
+      // 将缓存存储到硬盘
       type: 'filesystem',
+      // 设置缓存的版本，这里是根据环境变量的提取的key 生成了一个hash
       version: createEnvironmentHash(env.raw),
+      // 缓存存放的位置
       cacheDirectory: paths.appWebpackCache,
+      // 这里是在告诉webpack应该什么时候存储数据
+      // pack就是当compiler是空闲的时候
       store: 'pack',
+      // buildDependencies为构建添加额外的依赖
+      // webpack将会使用这些项去校验缓存是否有效
+      // 默认是webpack/lib，会获取webpack的所有依赖
+      // 推荐设置 config: [__filename],这样会获取最新的配置以及依赖
+      // rca还添加了tsconfig的配置
       buildDependencies: {
         defaultWebpack: ['webpack/lib/'],
         config: [__filename],
@@ -265,9 +299,11 @@ module.exports = function (webpackEnv) {
         ),
       },
     },
+    // 关闭log
     infrastructureLogging: {
       level: 'none',
     },
+    // 优化相关的配置,如果将mode设置production，将会自动开启优化
     optimization: {
       minimize: isEnvProduction,
       minimizer: [
@@ -312,9 +348,11 @@ module.exports = function (webpackEnv) {
           },
         }),
         // This is only used in production mode
+        // css压缩提取插件
         new CssMinimizerPlugin(),
       ],
     },
+    // 配置webpack如何解析模块
     resolve: {
       // This allows you to set a fallback for where webpack should look for modules.
       // We placed these paths second because we want `node_modules` to "win"
@@ -329,6 +367,7 @@ module.exports = function (webpackEnv) {
       // https://github.com/facebook/create-react-app/issues/290
       // `web` extension prefixes have been added for better support
       // for React Native Web.
+      // 配置徐亚解析的拓展名
       extensions: paths.moduleFileExtensions
         .map(ext => `.${ext}`)
         .filter(ext => useTypeScript || !ext.includes('ts')),
@@ -341,6 +380,7 @@ module.exports = function (webpackEnv) {
           'react-dom$': 'react-dom/profiling',
           'scheduler/tracing': 'scheduler/tracing-profiling',
         }),
+        // 将src作为了别名
         ...(modules.webpackAliases || {}),
       },
       plugins: [
@@ -349,6 +389,7 @@ module.exports = function (webpackEnv) {
         // To fix this, we prevent you from importing files out of src/ -- if you'd like to,
         // please link the files into your node_modules/ and let module-resolution kick in.
         // Make sure your source files are compiled, as they will not be processed in any way.
+        // 确保用户不会使用相对路径引入src以外的路径
         new ModuleScopePlugin(paths.appSrc, [
           paths.appPackageJson,
           reactRefreshRuntimeEntry,
@@ -359,10 +400,14 @@ module.exports = function (webpackEnv) {
         ]),
       ],
     },
+    // 这个设置决定了webpack如何处理不同类型的模块
     module: {
+      // 无效的导出将会报错
       strictExportPresence: true,
       rules: [
         // Handle node_modules packages that contain sourcemaps
+        // 处理packages里面包含的sourcemaps
+        // 从已存在的源文件中(sourceMappingURL)提取sourcemaps
         shouldUseSourceMap && {
           enforce: 'pre',
           exclude: /@babel(?:\/|\\{1,2})runtime/,
@@ -373,6 +418,7 @@ module.exports = function (webpackEnv) {
           // "oneOf" will traverse all following loaders until one will
           // match the requirements. When no loader matches it will fall
           // back to the "file" loader at the end of the loader list.
+          // 匹配第一个满足的规则
           oneOf: [
             // TODO: Merge this config once `image/avif` is in the mime-db
             // https://github.com/jshttp/mime-db
@@ -398,6 +444,7 @@ module.exports = function (webpackEnv) {
                 },
               },
             },
+            // 处理svg
             {
               test: /\.svg$/,
               use: [
@@ -426,6 +473,7 @@ module.exports = function (webpackEnv) {
             },
             // Process application JS with Babel.
             // The preset includes JSX, Flow, TypeScript, and some ESnext features.
+            // 使用babel处理js ts tsx
             {
               test: /\.(js|mjs|jsx|ts|tsx)$/,
               include: paths.appSrc,
@@ -451,6 +499,7 @@ module.exports = function (webpackEnv) {
                 // This is a feature of `babel-loader` for webpack (not Babel itself).
                 // It enables caching results in ./node_modules/.cache/babel-loader/
                 // directory for faster rebuilds.
+                // 开启缓存
                 cacheDirectory: true,
                 // See #6846 for context on why cacheCompression is disabled
                 cacheCompression: false,
@@ -612,6 +661,18 @@ module.exports = function (webpackEnv) {
             : undefined
         )
       ),
+      new DuplicateHtmlWebpackPlugin({
+        html: [
+          {
+            name: 'guid',
+            title: '注册指引'
+          },
+          {
+            name: 'content',
+            title: '内容介绍'
+          }
+        ]
+      }),
       // Inlines the webpack runtime script. This script is too small to warrant
       // a network request.
       // https://github.com/facebook/create-react-app/issues/5358
@@ -626,6 +687,7 @@ module.exports = function (webpackEnv) {
       new InterpolateHtmlPlugin(HtmlWebpackPlugin, env.raw),
       // This gives some necessary context to module not found errors, such as
       // the requesting resource.
+      // 当没有找到某些模块时提供最够多的提示信息
       new ModuleNotFoundPlugin(paths.appPath),
       // Makes some environment variables available to the JS code, for example:
       // if (process.env.NODE_ENV === 'production') { ... }. See `./env.js`.
